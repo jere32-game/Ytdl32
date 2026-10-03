@@ -154,7 +154,6 @@ function friendlyError(raw) {
   if (/confirm you.?re not a bot|sign in to confirm/i.test(msg)) {
     return 'YouTube bloqueó al servidor (anti-bot). Prueba con otro video o configura cookies.txt en el server';
   }
-  // Va ANTES que el de "no disponible": dice "is not available" pero NO significa que el video no exista
   if (/requested format is not available|only images are available/i.test(msg)) {
     return 'yt-dlp no pudo sacar un formato descargable (mira /api/health: versión de Node y de yt-dlp)';
   }
@@ -204,10 +203,9 @@ function runYtDlp(args, timeoutMs) {
 }
 
 function baseArgs() {
-  // Desde yt-dlp 2025.11.12 hace falta un runtime de JS para YouTube: usamos el mismo Node del server.
   const a = ['--no-playlist', '--no-warnings', '--js-runtimes', `node:${process.execPath}`];
   if (fs.existsSync(COOKIES_FILE)) a.push('--cookies', COOKIES_FILE);
-  if (process.env.YTDLP_EXTRA) a.push(...process.env.YTDLP_EXTRA.split(/\s+/).filter(Boolean)); // ajustes sin tocar el código
+  if (process.env.YTDLP_EXTRA) a.push(...process.env.YTDLP_EXTRA.split(/\s+/).filter(Boolean)); 
   return a;
 }
 
@@ -220,15 +218,23 @@ async function processJob(v) {
 
     // 1) Datos del video (sin descargar) para validar duración
     const info = await runYtDlp([...baseArgs(), '--ignore-no-formats-error', '--print', '%(duration)s\t%(is_live)s\t%(title)s', url], 90_000);
-    const [dur, live, ...rest] = info.trim().split('\n').pop().split('\t');
-    v.title = rest.join('\t');
-    v.duration = Number(dur);
-    if (live === 'True') throw new Error('No se admiten transmisiones en vivo');
-    if (!Number.isFinite(v.duration)) throw new Error('No se pudo leer la duración del video');
+    
+    // Parche: manejar de forma segura cuando la respuesta viene vacía o con "NA"
+    const lastLine = info.trim().split('\n').pop() || '';
+    const parts = lastLine.split('\t');
+    
+    v.duration = Number(parts[0]);
+    if (isNaN(v.duration)) {
+      v.duration = 0; // Si YouTube responde "NA", asumimos 0 para que no crashee
+    }
+
+    const live = parts[1];
+    v.title = parts.slice(2).join('\t') || 'Video de YouTube';
+
+    if (live === 'True' || live === 'true') throw new Error('No se admiten transmisiones en vivo');
     if (v.duration > MAX_DURATION_S) throw new Error(`El video dura más de ${Math.round(MAX_DURATION_S / 60)} minutos`);
 
     // 2) Descarga. Forzamos formato MP4/M4A nativos para evitar que FFmpeg recodifique el video
-    //    y consuma CPU/GPU. También limitamos a 1 hilo por seguridad.
     const args = [
       ...baseArgs(), '-q', '--no-progress', '--no-part',
       '--max-filesize', MAX_FILESIZE,
@@ -245,7 +251,7 @@ async function processJob(v) {
 
     v.file = file;
     v.mime = file.endsWith('.webm') ? 'video/webm' : 'video/mp4';
-    v.expiresAt = Date.now() + TTL_MS; // los 5 minutos empiezan cuando queda listo
+    v.expiresAt = Date.now() + TTL_MS; 
     v.status = 'ready';
     saveMeta();
   } catch (e) {
@@ -274,7 +280,7 @@ app.disable('x-powered-by');
 app.set('trust proxy', true);
 
 app.use((req, res, next) => {
-  res.set('Access-Control-Allow-Origin', '*'); // la extensión de TurboWarp necesita CORS
+  res.set('Access-Control-Allow-Origin', '*');
   next();
 });
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
@@ -297,7 +303,6 @@ app.get('/', (req, res) => res.type('text').send('OK'));
 
 let versionCache = { at: 0, value: null };
 
-// Diagnóstico: ábrelo en el navegador -> https://tu-server/api/health
 app.get('/api/health', async (req, res) => {
   if (Date.now() - versionCache.at > 10 * 60_000) {
     try {
@@ -332,7 +337,7 @@ app.get('/api/create', (req, res) => {
   if (queue.length >= MAX_QUEUE) return res.status(503).json({ error: 'Servidor ocupado, intenta en unos minutos' });
 
   const v = {
-    token: crypto.randomBytes(16).toString('base64url'), // enlace único e imposible de adivinar
+    token: crypto.randomBytes(16).toString('base64url'),
     ytId,
     status: 'queued',
     createdAt: Date.now(),
@@ -349,7 +354,6 @@ app.get('/api/status/:id', (req, res) => {
   res.json(publicInfo(v, req));
 });
 
-// El video directo: se muestra en el navegador (inline), nunca se fuerza la descarga.
 app.get('/v/:token', (req, res) => {
   const token = String(req.params.token).replace(/\.[A-Za-z0-9]+$/, '');
   const v = alive(token);
@@ -367,7 +371,6 @@ app.get('/v/:token', (req, res) => {
   });
 });
 
-// Reproductor mínimo, sin botón de descarga
 app.get('/watch/:token', (req, res) => {
   const v = alive(req.params.token);
   if (!v) return res.status(404).type('text').send('Video no encontrado o expirado');
@@ -383,7 +386,6 @@ app.get('/watch/:token', (req, res) => {
 // ───────────── Arranque ─────────────
 loadMeta();
 setInterval(sweep, 60_000);
-// yt-dlp se rompe seguido por cambios de YouTube: se auto-actualiza cada 24 h
 setInterval(() => { getYtDlp().then(() => runYtDlp(['-U'], 120_000)).catch(() => {}); }, 24 * 3600_000);
 
 app.listen(PORT, '0.0.0.0', () => {
