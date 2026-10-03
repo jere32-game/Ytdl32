@@ -8,7 +8,7 @@
  *  GET /v/<id>                           -> el video en sí (inline + Range, NO fuerza descarga)
  *  GET /watch/<id>                       -> mini reproductor sin botón de descarga
  *
- * Cada video se borra solo 1 minuto después de quedar listo.
+ * Cada video se borra solo 5 minutos después de quedar listo.
  */
 
 const express = require('express');
@@ -22,8 +22,8 @@ const { pipeline } = require('stream/promises');
 // ───────────── Configuración (se puede cambiar con variables de entorno) ─────────────
 const PORT = process.env.SERVER_PORT || process.env.PORT || 3000;
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/+$/, ''); // ej: https://mi-app.wispbyte.app
-const TTL_MS = 60 * 1000; // vida del video: 1 minuto
-const REUSE_MIN_MS = 30 * 1000; // si piden el mismo video, se reutiliza solo si le quedan > 30 seg
+const TTL_MS = 5 * 60 * 1000; // vida del video: 5 minutos
+const REUSE_MIN_MS = 60 * 1000; // si piden el mismo video, se reutiliza solo si le queda > 1 min
 const MAX_DURATION_S = Number(process.env.MAX_DURATION_S || 1800); // 30 min
 const MAX_HEIGHT = Number(process.env.MAX_HEIGHT || 720);
 const MAX_FILESIZE = process.env.MAX_FILESIZE || '300M';
@@ -245,7 +245,7 @@ async function processJob(v) {
 
     v.file = file;
     v.mime = file.endsWith('.webm') ? 'video/webm' : 'video/mp4';
-    v.expiresAt = Date.now() + TTL_MS; // el minuto empieza cuando queda listo
+    v.expiresAt = Date.now() + TTL_MS; // los 5 minutos empiezan cuando queda listo
     v.status = 'ready';
     saveMeta();
   } catch (e) {
