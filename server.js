@@ -227,14 +227,14 @@ async function processJob(v) {
     if (!Number.isFinite(v.duration)) throw new Error('No se pudo leer la duración del video');
     if (v.duration > MAX_DURATION_S) throw new Error(`El video dura más de ${Math.round(MAX_DURATION_S / 60)} minutos`);
 
-    // 2) Descarga. Sin -f a propósito: el selector por defecto de yt-dlp ya sabe si hay ffmpeg para unir
-    //    video+audio (si no, baja un archivo "todo en uno"). -S solo ordena: tope de MAX_HEIGHT y prefiere
-    //    h264/aac, que se ve en todos los navegadores.
+    // 2) Descarga. Forzamos formato MP4/M4A nativos para evitar que FFmpeg recodifique el video
+    //    y consuma CPU/GPU. También limitamos a 1 hilo por seguridad.
     const args = [
       ...baseArgs(), '-q', '--no-progress', '--no-part',
       '--max-filesize', MAX_FILESIZE,
-      '-S', `res:${MAX_HEIGHT},vcodec:h264,acodec:aac`,
+      '-f', `bestvideo[ext=mp4][height<=${MAX_HEIGHT}]+bestaudio[ext=m4a]/best[ext=mp4][height<=${MAX_HEIGHT}]/best`,
       '--merge-output-format', 'mp4',
+      '--postprocessor-args', 'ffmpeg:-threads 1',
       '-o', path.join(VIDEO_DIR, `${v.token}.%(ext)s`),
     ];
     if (FFMPEG) args.push('--ffmpeg-location', FFMPEG);
